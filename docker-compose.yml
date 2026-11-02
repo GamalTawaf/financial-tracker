@@ -1,0 +1,6 @@
+# Canonical stack lives in backend/. From repo root you can still run:
+#   docker compose up --build
+# which delegates to backend/docker-compose.yml.
+
+include:
+  - path: backend/docker-compose.yml
