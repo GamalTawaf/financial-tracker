@@ -3,6 +3,7 @@ name = "financial-tracker-api"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
+license = "MIT"
 authors = [
     { name = "Gamal Tawaf", email = "ja.tawaf@gmail.com" }
 ]
