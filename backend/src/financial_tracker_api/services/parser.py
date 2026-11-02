@@ -35,15 +35,17 @@ class ParsedReceipt:
 
 
 _MONEY = re.compile(r"\$?\s*(-?\d+[.,]\d{2})")
-_DATE = re.compile(
-    r"\b(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b"
-)
-_TRAILING_PRICE = re.compile(
-    r"^(?P<name>.+?)\s+(?P<price>\$?-?\d+[.,]\d{2})\s*$"
-)
+_DATE = re.compile(r"\b(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b")
+_TRAILING_PRICE = re.compile(r"^(?P<name>.+?)\s+(?P<price>\$?-?\d+[.,]\d{2})\s*$")
 _WEIGHT_LINE = re.compile(
     r"^(?P<qty>\d+(?:[.,]\d+)?)\s*(?P<qunit>kg|lb|lbs|g|oz)\s*@"
     r"\s*\$?(?P<unit>\d+[.,]\d{2})\s*/\s*(?P=qunit)"
+    r"(?:\s+(?P<price>\$?-?\d+[.,]\d{2}))?\s*$",
+    re.I,
+)
+# Count × unit price, e.g. ``2 @ $1.89 3.78`` (Adonis bakery).
+_COUNT_AT_PRICE = re.compile(
+    r"^(?P<qty>\d+)\s*@\s*\$?(?P<unit>\d+[.,]\d{2})"
     r"(?:\s+(?P<price>\$?-?\d+[.,]\d{2}))?\s*$",
     re.I,
 )
@@ -56,15 +58,17 @@ _QTY_UNIT_ALIASES = {
 }
 _PHONE = re.compile(r"(?:TEL\.?|PHONE)\s*:?\s*([\d().\-\s]{7,})", re.I)
 _SKIP_NAME = re.compile(
-    r"^(sub\s*tot|subtotal|total|tax|hst|gst|pst|change|cash|visa|master|"
+    r"^(sub\s*tot|subtotal|tot\s*al|total|tax|hst|gst|pst|change|cash|visa|master|"
     r"debit|credit|thank|tel\.?|phone|account|card|trans\.?|date|ref|"
     r"saving|promo|visit|www\.|http|shop |join |how did|your code|"
-    r"e&oe|grocery|vegetable|keep |xxx+|#+)",
+    r"e&oe|grocery|vegetable|keep |xxx+|#+|mediterranean|"
+    r"delivered|cornershop|survey)",
     re.I,
 )
 _SECTION = re.compile(
     r"^(grocery|vegetable|vegetables|produce|fruit|fruits|bakery|meat|deli|"
-    r"dairy|beverage|beverages|frozen|seafood|snacks?)\b",
+    r"dairy|beverage|beverages|frozen|seafood|snacks?|"
+    r"rfs(?:\s+pr\.?\s*meals?)?|pr\.?\s*meals?|prepared(?:\s+meals?)?)\b",
     re.I,
 )
 _SECTION_TO_CATEGORY = {
@@ -84,7 +88,15 @@ _SECTION_TO_CATEGORY = {
     "seafood": "meat",
     "snack": "snacks",
     "snacks": "snacks",
+    "rfs": "prepared",
+    "pr": "prepared",
+    "prepared": "prepared",
 }
+_STORE_JUNK = re.compile(
+    r"^(~+|[-~.=]+|mediterranean\s+market|customer\s+copy)\b",
+    re.I,
+)
+_ITEM_QTY_PREFIX = re.compile(r"^\(\d+\)\s*")
 _ADDRESSISH = re.compile(
     r"\b(rd|road|st|street|ave|avenue|blvd|unit|suite|on|qc|bc|ab)\b|\d{3,}",
     re.I,
@@ -136,11 +148,48 @@ def _parse_date(raw: str, *, today: date | None = None) -> date | None:
 
 def _clean_store_name(raw: str) -> str:
     # Drop OCR junk after a clear store code / colon.
-    name = re.split(r"\s{2,}|:", raw, maxsplit=1)[0].strip(" .:-")
+    name = re.split(r"\s{2,}|:", raw, maxsplit=1)[0].strip(" .:-~")
     name = re.sub(r"\s+", " ", name)
     # Common OCR miss on Adonis receipts.
     name = re.sub(r"\bADONTS\b", "ADONIS", name, flags=re.I)
     return name[:120]
+
+
+def _clean_item_name(raw: str) -> str:
+    """Strip leading ``(2)`` qty markers and trailing junk from product names."""
+    name = _ITEM_QTY_PREFIX.sub("", raw).strip(" -.")
+    return re.sub(r"\s+", " ", name)
+
+
+def _pick_store_name(lines: list[str]) -> str:
+    """Prefer a real banner (e.g. ADONIS 101204) over OCR crumbs like ``~~``."""
+    preferred = re.compile(r"\bADON[IT]S\b", re.I)
+    for line in lines[:12]:
+        if _STORE_JUNK.match(line.strip(" -.")):
+            continue
+        if preferred.search(line):
+            return _clean_store_name(line)
+    for line in lines[:8]:
+        cleaned = line.strip(" -.~")
+        if (
+            len(cleaned) >= 3
+            and not _STORE_JUNK.match(cleaned)
+            and not _ADDRESSISH.search(cleaned)
+            and not _PHONE.search(cleaned)
+            and not _SECTION.match(cleaned)
+            and not _SKIP_NAME.match(cleaned)
+            and not _MONEY.search(cleaned)
+        ):
+            return _clean_store_name(cleaned)
+    return _clean_store_name(lines[0])
+
+
+def _section_category(label: str) -> str | None:
+    key = label.lower().strip()
+    if key in _SECTION_TO_CATEGORY:
+        return _SECTION_TO_CATEGORY[key]
+    # Remaining _SECTION matches are RFS / prepared-meal headers.
+    return "prepared"
 
 
 def _clean_address_line(raw: str) -> str:
@@ -211,14 +260,19 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
     if not lines:
         return result
 
-    result.store_name = _clean_store_name(lines[0])
+    result.store_name = _pick_store_name(lines)
     phone_anywhere = _PHONE.search(text)
     if phone_anywhere:
         result.store_phone = re.sub(r"\s+", " ", phone_anywhere.group(1)).strip()
 
     address_parts: list[str] = []
-    for header in lines[1:8]:
-        if _PHONE.search(header):
+    # Address sits under the store banner — skip OCR crumbs / taglines above it.
+    header_start = next(
+        (idx for idx, header in enumerate(lines[:12]) if re.search(r"\bADON[IT]S\b", header, re.I)),
+        0,
+    )
+    for header in lines[header_start + 1 : header_start + 8]:
+        if _PHONE.search(header) or _STORE_JUNK.match(header.strip(" -.")):
             continue
         if _SECTION.match(header) or _SKIP_NAME.match(header):
             break
@@ -244,7 +298,7 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
         lower = line.lower()
         section = _SECTION.match(line)
         if section:
-            section_category = _SECTION_TO_CATEGORY.get(section.group(1).lower())
+            section_category = _section_category(section.group(1))
             pending_name = None
             continue
 
@@ -268,15 +322,17 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
                 result.tax_total_cents = cents
                 pending_name = None
                 continue
+            # OCR often splits TOTAL → ``TOT AL``; compact still contains ``total``.
             if (
-                re.search(r"\btotal\b", lower)
-                and "sub" not in lower
+                ("total" in compact or re.search(r"\btot(?:al|\s*al)\b", lower))
+                and "sub" not in compact
                 and "items" not in lower
                 and "saving" not in lower
                 and "discount" not in lower
                 and "credit" not in lower
                 and "account" not in lower
                 and "mastercard" not in lower
+                and "grocer" not in lower
             ):
                 result.total_cents = cents
                 pending_name = None
@@ -306,7 +362,7 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
                     total = printed
             else:
                 total = computed
-            name = pending_name or "Weighted item"
+            name = _clean_item_name(pending_name or "Weighted item")
             pending_name = None
             result.lines.append(
                 ParsedLine(
@@ -321,10 +377,37 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
             )
             continue
 
+        count_at = _COUNT_AT_PRICE.match(line)
+        if count_at:
+            qty = float(count_at.group("qty"))
+            unit = _to_cents(count_at.group("unit"))
+            computed = int(round(qty * unit))
+            if count_at.group("price"):
+                printed = _to_cents(count_at.group("price"))
+                delta = abs(printed - computed)
+                # Exact/near match keep printed; small OCR slip → qty×rate; else printed.
+                total = computed if 1 < delta <= 15 else printed
+            else:
+                total = computed
+            name = _clean_item_name(pending_name or "Item")
+            pending_name = None
+            result.lines.append(
+                ParsedLine(
+                    name=name,
+                    quantity=qty,
+                    unit_price_cents=unit,
+                    line_total_cents=total,
+                    confidence=0.9,
+                    category=section_category,
+                    quantity_unit="ea",
+                )
+            )
+            continue
+
         priced = _TRAILING_PRICE.match(line)
         if priced:
-            name = priced.group("name").strip(" -.")
-            if len(name) < 2 or _SKIP_NAME.match(name):
+            name = _clean_item_name(priced.group("name"))
+            if len(name) < 2 or _SKIP_NAME.match(name) or _COUNT_AT_PRICE.match(name):
                 continue
             # Multi-word product name continued from previous bare line.
             if pending_name and not _MONEY.search(pending_name):
@@ -352,8 +435,9 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
             and not _DATE.search(line)
             and not _ADDRESSISH.search(line)
             and not re.search(r"@|://", line)
+            and not _STORE_JUNK.match(line.strip(" -."))
         ):
-            pending_name = line.strip(" -.")
+            pending_name = _clean_item_name(line)
 
     if result.total_cents is None and result.subtotal_cents is not None:
         result.total_cents = result.subtotal_cents

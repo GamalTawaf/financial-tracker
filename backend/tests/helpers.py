@@ -66,9 +66,7 @@ def png_bytes(
     return buf.getvalue()
 
 
-def register(
-    client: TestClient, email: str, password: str = "Password123!ab", **extra: Any
-) -> str:
+def register(client: TestClient, email: str, password: str = "Password123!ab", **extra: Any) -> str:
     body = {"email": email, "password": password, "display_name": extra.get("display_name", email)}
     response = client.post("/api/auth/register", json=body)
     assert response.status_code == 201, response.text

@@ -68,7 +68,5 @@ def find_or_create_store(
 def list_stores_for_user(session: Session, user_id: int) -> list[Store]:
     """List stores for a user, name ascending."""
     return list(
-        session.exec(
-            select(Store).where(Store.user_id == user_id).order_by(col(Store.name))
-        ).all()
+        session.exec(select(Store).where(Store.user_id == user_id).order_by(col(Store.name))).all()
     )

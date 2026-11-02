@@ -26,9 +26,7 @@ def _load_for_ocr(image_path: Path) -> Image.Image:
 def run_ocr(image_path: Path) -> tuple[str, float]:
     """Return (text, mean_confidence 0-1) for an image path."""
     image = _load_for_ocr(image_path)
-    data = pytesseract.image_to_data(
-        image, config=_OCR_CONFIG, output_type=pytesseract.Output.DICT
-    )
+    data = pytesseract.image_to_data(image, config=_OCR_CONFIG, output_type=pytesseract.Output.DICT)
     texts: list[str] = []
     confidences: list[float] = []
     for text, conf in zip(data.get("text", []), data.get("conf", []), strict=False):

@@ -120,7 +120,9 @@
 				{#if receipt.store?.address || receipt.store?.phone}
 					<p class="muted" style="margin-top: 8px">
 						{#if receipt.store.address}{receipt.store.address}{/if}
-						{#if receipt.store.address && receipt.store.phone} · {/if}
+						{#if receipt.store.address && receipt.store.phone}
+							·
+						{/if}
 						{#if receipt.store.phone}{receipt.store.phone}{/if}
 					</p>
 				{/if}

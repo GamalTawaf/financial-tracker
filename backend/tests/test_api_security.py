@@ -206,9 +206,7 @@ TOTAL 1.00
 
 def test_reparse_missing_receipt_404(client) -> None:
     token = register(client, "reparse-miss@example.com")
-    assert (
-        client.post("/api/receipts/9999/reparse", headers=auth_header(token)).status_code == 404
-    )
+    assert client.post("/api/receipts/9999/reparse", headers=auth_header(token)).status_code == 404
 
 
 def test_delete_removes_image_file(client) -> None:

@@ -108,7 +108,6 @@ TOTAL 1.50
     assert melon["line_total_cents"] == 150
 
 
-
 def test_list_get_patch_receipt_and_line_item(client) -> None:
     token = register(client, "flow@example.com")
     headers = auth_header(token)
@@ -374,6 +373,92 @@ TOTAL 1.00
     assert "0E5" in response.json()["store"]["address"].upper().replace(" ", "")
 
 
+def test_adonis_bakery_count_at_price_and_garbled_totals(client) -> None:
+    """Real bakery slip: OCR turns $8.37 into 38.37/3.37; trust lines + card."""
+    token = register(client, "bakery@example.com")
+    ocr = """\
+- ~~
+Mediterranean market
+ADONIS 101204
+3245 WONDERLAND RD S UNIT A
+LONDON ON N6L 0E3
+TEL. : 548-488-2782 |
+BAKERY
+(2)ADONIS WH.BRAN P
+2 @ $1.89 3.78
+RFS PR.MEALS
+ADONIS GARLIC SC 4.59
+SUBTOT AL. 38.37
+TOT AL 3.37
+CREDIT CR 8.37
+Total number of items sold = 3
+Account: MASTERCARD CAD$ 8.37
+DateTime: 26/10/29 14:49:25
+10/29/2026 101204
+"""
+    response = upload_receipt(client, token, ocr_text=ocr)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["store_name"].upper().startswith("ADONIS")
+    assert "3245" in (body["store"]["address"] or "")
+    assert body["purchased_at"] == "2026-10-29"
+    assert body["total_cents"] == 837
+    assert body["subtotal_cents"] == 837
+    names = {item["name"].upper() for item in body["line_items"]}
+    assert any("BRAN" in n for n in names)
+    assert any("GARLIC" in n for n in names)
+    assert not any("TOT" == n or n.startswith("TOT ") for n in names)
+    bran = next(i for i in body["line_items"] if "BRAN" in i["name"].upper())
+    assert bran["quantity"] == 2
+    assert bran["quantity_unit"] == "ea"
+    assert bran["line_total_cents"] == 378
+    assert bran["category"] == "bakery"
+    garlic = next(i for i in body["line_items"] if "GARLIC" in i["name"].upper())
+    assert garlic["line_total_cents"] == 459
+    assert garlic["category"] == "prepared"
+    assert sum(i["line_total_cents"] for i in body["line_items"]) == 837
+
+
+def test_count_at_price_without_extension_and_far_mismatch(client) -> None:
+    token = register(client, "countat@example.com")
+    ocr = """\
+Corner Bakery
+Dinner Rolls
+3 @ $2.00
+Croissant
+2 @ $1.50 9.99
+Baguette
+2 @ $1.89 3.71
+TOTAL 15.99
+"""
+    response = upload_receipt(client, token, ocr_text=ocr)
+    assert response.status_code == 201
+    rolls = next(i for i in response.json()["line_items"] if "ROLL" in i["name"].upper())
+    assert rolls["quantity"] == 3
+    assert rolls["line_total_cents"] == 600
+    croissant = next(i for i in response.json()["line_items"] if "CROISSANT" in i["name"].upper())
+    # Printed 9.99 is far from 2×1.50=3.00 → keep printed.
+    assert croissant["line_total_cents"] == 999
+    baguette = next(i for i in response.json()["line_items"] if "BAGUETTE" in i["name"].upper())
+    # 3.71 vs 3.78 → OCR slip, prefer qty×rate.
+    assert baguette["line_total_cents"] == 378
+
+
+def test_store_name_falls_back_when_banner_is_junk(client) -> None:
+    token = register(client, "junkstore@example.com")
+    ocr = """\
+~~
+100 King St
+TEL.: 416-555-0100
+GROCERY
+Milk 1.00
+TOTAL 1.00
+"""
+    response = upload_receipt(client, token, ocr_text=ocr)
+    assert response.status_code == 201
+    assert response.json()["line_items"]
+
+
 def test_patch_receipt_individual_fields(client) -> None:
     token = register(client, "patchbits@example.com")
     headers = auth_header(token)
@@ -402,11 +487,8 @@ def test_patch_receipt_individual_fields(client) -> None:
         ).json()["needs_review"]
         is True
     )
-    assert (
-        client.patch(
-            f"/api/receipts/{receipt_id}",
-            headers=headers,
-            json={"review_reasons": ["manual"]},
-        ).json()["review_reasons"]
-        == ["manual"]
-    )
+    assert client.patch(
+        f"/api/receipts/{receipt_id}",
+        headers=headers,
+        json={"review_reasons": ["manual"]},
+    ).json()["review_reasons"] == ["manual"]

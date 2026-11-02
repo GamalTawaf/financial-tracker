@@ -83,7 +83,9 @@ def refresh(
     """Rotate a refresh token into a new token pair."""
     pair = rotate_refresh_token(session, body.refresh_token)
     if pair is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
     access, refresh_token, expires_in = pair
     return TokenResponse(
         access_token=access,

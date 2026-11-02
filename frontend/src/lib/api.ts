@@ -146,10 +146,14 @@ type TokenPayload = {
 };
 
 async function authRequest(path: string, body: unknown): Promise<TokenPayload> {
-	const payload = await request<TokenPayload>(path, {
-		method: 'POST',
-		body: JSON.stringify(body)
-	}, false);
+	const payload = await request<TokenPayload>(
+		path,
+		{
+			method: 'POST',
+			body: JSON.stringify(body)
+		},
+		false
+	);
 	setTokens(payload.access_token, payload.refresh_token);
 	return payload;
 }
@@ -162,10 +166,14 @@ export const api = {
 		const refresh = getRefreshToken();
 		if (refresh) {
 			try {
-				await request('/api/auth/logout', {
-					method: 'POST',
-					body: JSON.stringify({ refresh_token: refresh })
-				}, false);
+				await request(
+					'/api/auth/logout',
+					{
+						method: 'POST',
+						body: JSON.stringify({ refresh_token: refresh })
+					},
+					false
+				);
 			} catch {
 				/* ignore */
 			}

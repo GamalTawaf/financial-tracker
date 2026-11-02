@@ -59,10 +59,7 @@ class Settings(BaseSettings):
                 "SECRET_KEY is a known default. Set a strong SECRET_KEY before "
                 "running with ENVIRONMENT=production."
             )
-        if (
-            self.environment == "production"
-            and len(self.secret_key) < 32
-        ):
+        if self.environment == "production" and len(self.secret_key) < 32:
             raise RuntimeError("SECRET_KEY must be at least 32 characters in production.")
 
 

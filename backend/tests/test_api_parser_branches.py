@@ -26,9 +26,10 @@ TOTAL 2.00
 """
     response = upload_receipt(client, token, ocr_text=ocr)
     assert response.status_code == 201
-    assert response.json()["store"]["address"] in ("", None) or response.json()["store"][
-        "address"
-    ] == ""
+    assert (
+        response.json()["store"]["address"] in ("", None)
+        or response.json()["store"]["address"] == ""
+    )
 
 
 def test_priced_skip_name_and_short_name(client) -> None:

@@ -247,7 +247,9 @@ def get_receipt_image(
     try:
         path = resolve_receipt_path(settings.data_dir, receipt.image_path)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found") from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Image not found"
+        ) from exc
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
     media = {
@@ -279,7 +281,9 @@ def reparse_receipt(
     try:
         path = resolve_receipt_path(settings.data_dir, receipt.image_path)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found") from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Image not found"
+        ) from exc
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
     try:
