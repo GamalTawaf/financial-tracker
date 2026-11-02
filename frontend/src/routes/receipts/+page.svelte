@@ -34,7 +34,9 @@
 				needs_review: false,
 				review_reasons: []
 			});
-			receipts = receipts.map((r) => (r.id === id ? { ...r, ...updated, line_items: r.line_items } : r));
+			receipts = receipts.map((r) =>
+				r.id === id ? { ...r, ...updated, line_items: r.line_items } : r
+			);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Could not mark as reviewed';
 		} finally {

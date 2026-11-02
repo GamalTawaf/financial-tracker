@@ -165,9 +165,7 @@
 			const updated = await api.patchLineItem(item.id, body);
 			receipt = {
 				...receipt,
-				line_items: receipt.line_items.map((row: LineItem) =>
-					row.id === item.id ? updated : row
-				)
+				line_items: receipt.line_items.map((row: LineItem) => (row.id === item.id ? updated : row))
 			};
 			const next = { ...drafts };
 			delete next[item.id];
@@ -282,7 +280,9 @@
 		{/if}
 
 		<div class="panel">
-			<p class="muted save-hint">Edit a row, then press Save. Category changes apply to future uploads.</p>
+			<p class="muted save-hint">
+				Edit a row, then press Save. Category changes apply to future uploads.
+			</p>
 			<div class="table-wrap">
 				<table class="table">
 					<thead>
@@ -325,8 +325,7 @@
 										class="cell-input"
 										value={draft.quantity_unit}
 										aria-label="Quantity unit"
-										onchange={(e) =>
-											setDraft(item.id, { quantity_unit: e.currentTarget.value })}
+										onchange={(e) => setDraft(item.id, { quantity_unit: e.currentTarget.value })}
 									>
 										<option value="ea">ea</option>
 										<option value="kg">kg</option>

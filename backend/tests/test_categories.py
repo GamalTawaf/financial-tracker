@@ -65,7 +65,7 @@ def test_remember_updates_existing_rule(client) -> None:
         remember_category,
     )
 
-    token = register(client, "updaterule@example.com")
+    register(client, "updaterule@example.com")
     engine = client.app.state.test_engine
     with Session(engine) as session:
         from financial_tracker_api.models import User

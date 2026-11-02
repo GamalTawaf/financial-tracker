@@ -226,7 +226,9 @@ def test_upload_rejects_unsupported_type_and_oversized(client) -> None:
     )
     assert bad_type.status_code == 400
 
-    with patch("financial_tracker_api.routers.receipts.extract_receipt_text", return_value=("X", 0.9)):
+    with patch(
+        "financial_tracker_api.routers.receipts.extract_receipt_text", return_value=("X", 0.9)
+    ):
         huge = client.post(
             "/api/receipts/upload",
             headers=headers,

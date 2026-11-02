@@ -131,7 +131,9 @@ def test_costco_price_on_following_line() -> None:
         "Orders & Purchases | Costco\nLONDON #530\n100 MAIN ST\n"
         "BANANAS\n1.69 N\nSUBTOTAL\n1.69\nTAX\n0.00\nTOTAL\n1.69\n"
     )
-    assert any(line.name.upper() == "BANANAS" and line.line_total_cents == 169 for line in parsed.lines)
+    assert any(
+        line.name.upper() == "BANANAS" and line.line_total_cents == 169 for line in parsed.lines
+    )
 
 
 def test_costco_item_stops_address_scan() -> None:
@@ -177,7 +179,9 @@ def test_upload_costco_applies_ny_tax_flags(client) -> None:
     items = {item["name"].upper(): item for item in response.json()["line_items"]}
     assert items["BLUEBERRIES"]["tax_status"] == "zero_rated"
     assert items["BLUEBERRIES"]["tax_amount_cents"] == 0
-    facial = next(item for item in response.json()["line_items"] if "FACIAL" in item["name"].upper())
+    facial = next(
+        item for item in response.json()["line_items"] if "FACIAL" in item["name"].upper()
+    )
     assert facial["tax_status"] == "taxable"
     assert facial["tax_amount_cents"] == 299  # 13% of 2299
     assert response.json()["tax_total_cents"] == 299
