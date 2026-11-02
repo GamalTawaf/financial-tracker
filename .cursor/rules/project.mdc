@@ -5,10 +5,10 @@ alwaysApply: true
 
 # Financial Tracker
 
-- Read `AGENTS.md` before coding. One feature from `feature_list.json` at a time.
-- Run `./init.sh` when the scaffold exists; fix baseline failures first.
+- Read `.agent/AGENTS.md` before coding. One feature from `.agent/feature_list.json` at a time.
+- Prefer `docker compose up --build` (app :3000). Run `./init.sh` for local tooling verification; fix baseline failures first.
 - Backend: FastAPI + **uv** + PEP 8 (Ruff). Frontend: SvelteKit.
 - Scope all data by authenticated `user_id`. Money in integer cents CAD.
 - Ontario HST rules for tax — no blind tax split across lines.
 - Do not merge PRs unless the human asks. Do not invent a palette.
-- UI PRs: Unslop + impeccable; `DESIGN.md` is the contract; tokens in `app.css`.
+- UI PRs: Unslop + impeccable; `.agent/DESIGN.md` is the contract; tokens in `app.css`.

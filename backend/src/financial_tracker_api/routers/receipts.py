@@ -18,9 +18,13 @@ from financial_tracker_api.schemas import (
     ReceiptUpdateRequest,
     StoreResponse,
 )
-from financial_tracker_api.services.categories import classify_category
+from financial_tracker_api.services.categories import (
+    classify_category,
+    lookup_learned_category,
+    remember_category,
+)
 from financial_tracker_api.services.flagging import apply_review_flags
-from financial_tracker_api.services.ocr import run_ocr
+from financial_tracker_api.services.ocr import extract_receipt_text
 from financial_tracker_api.services.parser import parse_receipt_text
 from financial_tracker_api.services.stores import find_or_create_store
 from financial_tracker_api.services.tax import classify_tax_status, compute_tax_cents
@@ -93,10 +97,17 @@ def _replace_line_items(
         session.delete(item)
     session.commit()
 
+    assert receipt.user_id is not None
     line_items: list[LineItem] = []
     for parsed_line in parsed_lines:
-        category, cat_review = classify_category(parsed_line.name, parsed_line.category)
-        tax_status = classify_tax_status(parsed_line.name, category)
+        learned = lookup_learned_category(session, receipt.user_id, parsed_line.name)
+        category, cat_review = classify_category(
+            parsed_line.name,
+            parsed_line.category,
+            learned_category=learned,
+        )
+        # Costco N/Y flags beat keyword inference (Y = HST charged on that line).
+        tax_status = parsed_line.tax_status or classify_tax_status(parsed_line.name, category)
         tax_cents = compute_tax_cents(parsed_line.line_total_cents, tax_status)
         item = LineItem(
             receipt_id=receipt.id or 0,
@@ -144,7 +155,7 @@ async def upload_receipt(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> ReceiptResponse:
-    """Upload an image, OCR/parse it, and persist receipt + lines."""
+    """Upload an image or PDF, extract text, parse, and persist receipt + lines."""
     settings = get_settings()
     assert user.id is not None
     content = await _read_upload_limited(file, settings.max_upload_bytes)
@@ -159,12 +170,12 @@ async def upload_receipt(
     dest.write_bytes(content)
 
     try:
-        ocr_text, ocr_confidence = run_ocr(dest)
+        ocr_text, ocr_confidence = extract_receipt_text(dest)
     except (OSError, TypeError, ValueError) as exc:
         dest.unlink(missing_ok=True)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Could not read that image: {exc}",
+            detail=f"Could not read that receipt: {exc}",
         ) from exc
     parsed = parse_receipt_text(ocr_text)
     store = find_or_create_store(
@@ -258,6 +269,7 @@ def get_receipt_image(
         ".png": "image/png",
         ".webp": "image/webp",
         ".gif": "image/gif",
+        ".pdf": "application/pdf",
     }.get(path.suffix.lower(), "application/octet-stream")
     return FileResponse(path, media_type=media)
 
@@ -270,7 +282,7 @@ def reparse_receipt(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> ReceiptResponse:
-    """Re-run OCR + parse on the stored image and replace line items."""
+    """Re-run text extract + parse on the stored image/PDF and replace line items."""
     assert user.id is not None
     receipt = session.exec(
         select(Receipt).where(Receipt.id == receipt_id, Receipt.user_id == user.id)
@@ -287,11 +299,11 @@ def reparse_receipt(
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
     try:
-        ocr_text, ocr_confidence = run_ocr(path)
+        ocr_text, ocr_confidence = extract_receipt_text(path)
     except (OSError, TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Could not read that image: {exc}",
+            detail=f"Could not read that receipt: {exc}",
         ) from exc
     parsed = parse_receipt_text(ocr_text)
     store = find_or_create_store(
@@ -390,6 +402,11 @@ def patch_line_item(
     data = body.model_dump(exclude_unset=True)
     for key, value in data.items():
         setattr(item, key, value)
+    if "category" in data:
+        remember_category(session, user.id, item.name, item.category)
+        # Manual category clears category-based review; tax unknown still flags.
+        if item.tax_status != "unknown":
+            item.needs_review = False
     session.add(item)
     session.commit()
     session.refresh(item)

@@ -2,7 +2,7 @@
 
 from datetime import UTC, date, datetime
 
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -45,6 +45,19 @@ class Category(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     slug: str = Field(index=True, unique=True)
     name: str
+
+
+class CategoryRule(SQLModel, table=True):
+    """User-taught item name → category mapping for future receipts."""
+
+    __table_args__ = (UniqueConstraint("user_id", "name_key", name="uq_categoryrule_user_name"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    name_key: str = Field(index=True)
+    category: str
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class Store(SQLModel, table=True):

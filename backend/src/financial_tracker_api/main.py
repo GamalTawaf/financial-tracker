@@ -1,8 +1,10 @@
 """FastAPI application entrypoint."""
 
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
@@ -15,6 +17,34 @@ from financial_tracker_api.db import engine, init_db
 from financial_tracker_api.rate_limit import limiter
 from financial_tracker_api.routers import auth, receipts, stats, stores
 from financial_tracker_api.seed import seed_categories
+
+_SENSITIVE_FIELDS = frozenset(
+    {"password", "refresh_token", "access_token", "token", "secret", "secret_key"}
+)
+_FIELD_LABELS = {
+    "password": "Password",
+    "email": "Email",
+    "display_name": "Display name",
+}
+
+
+def _friendly_validation_detail(errors: list[Any]) -> str:
+    """Build a safe, human-readable validation message (never echo secrets)."""
+    parts: list[str] = []
+    for err in errors:
+        loc = [str(item) for item in err.get("loc", ()) if item not in ("body", "query", "path")]
+        field = loc[-1] if loc else "field"
+        label = _FIELD_LABELS.get(field, field.replace("_", " ").capitalize())
+        msg = str(err.get("msg", "Invalid value"))
+        if msg.startswith("Value error, "):
+            msg = msg[len("Value error, ") :]
+        if field == "password" and "at least" in msg.lower():
+            parts.append("Password must be at least 12 characters")
+        elif field in _SENSITIVE_FIELDS:
+            parts.append(msg if msg.lower().startswith("password") else f"{label}: {msg}")
+        else:
+            parts.append(f"{label}: {msg}")
+    return "; ".join(parts) or "Invalid request"
 
 
 @asynccontextmanager
@@ -63,6 +93,14 @@ def create_app() -> FastAPI:
     @app.exception_handler(ValueError)
     async def value_error_handler(_: Request, exc: ValueError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # Strip raw ``input`` (can contain passwords) from the client response.
+        return JSONResponse(
+            status_code=422,
+            content={"detail": _friendly_validation_detail(exc.errors())},
+        )
 
     return app
 

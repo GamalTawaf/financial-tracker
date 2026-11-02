@@ -6,29 +6,51 @@ Personal receipt expense tracker: upload a receipt image, parse line items with 
 
 - **Backend:** FastAPI + SQLModel + uv + Alembic + PEP 8 (Ruff)
 - **Frontend:** SvelteKit (sessionStorage auth + refresh tokens)
-- **OCR:** Tesseract (local)
-- **Harness:** [learn-harness-engineering](https://github.com/walkinglabs/learn-harness-engineering) templates
+- **OCR:** Tesseract (local, in the API image)
+- **Harness:** [learn-harness-engineering](https://github.com/walkinglabs/learn-harness-engineering) templates (under `.agent/`)
 - **UI craft:** [unslop](https://github.com/heydamir/unslop) + Attendi impeccable / design-taste skills
 
-## Quick start
+## Quick start (Docker)
 
 ```bash
-# once
+cp .env.example .env   # set SECRET_KEY (≥32 chars) and POSTGRES_PASSWORD
+docker compose up --build
+```
+
+- App: http://localhost:3000
+- API: http://localhost:8000 (`/docs` in development)
+- Postgres: internal only (`db:5432`)
+
+Stop with `Ctrl+C`, or `docker compose down`.
+
+Register with a 12+ character password (upper, lower, digit), upload a JPG/PNG or Costco Orders & Purchases PDF, then browse receipts, stores, and category totals.
+
+### Migrations (host tooling)
+
+```bash
+cd backend
+uv run alembic upgrade head
+```
+
+Compose applies migrations on API startup; use the host command when working against a local DB.
+
+## Local (no Docker)
+
+For API/frontend hot reload without containers:
+
+```bash
 brew install tesseract   # macOS
-cp .env.example .env     # set SECRET_KEY for anything beyond local toys
-chmod +x init.sh
+cp .env.example .env
+chmod +x init.sh && ./init.sh
 
-# verify
-./init.sh
-
-# run API
+# API
 cd backend && uv run uvicorn financial_tracker_api.main:app --reload --port 8000
 
-# run web (other terminal) — Vite proxies /api → :8000
+# Web (other terminal) — Vite proxies /api → :8000
 cd frontend && npm run dev
 ```
 
-Open http://localhost:5173 — register (12+ char password with upper/lower/digit), upload a JPG/PNG receipt, browse receipts and category totals.
+Open http://localhost:5173.
 
 ## Security notes
 
@@ -41,31 +63,12 @@ Open http://localhost:5173 — register (12+ char password with upper/lower/digi
 
 ## Agent workflow
 
-1. Read `AGENTS.md`, `claude-progress.md`, `feature_list.json`
-2. Run `./init.sh`
+Agent instructions and progress live under **`.agent/`** (root `AGENTS.md` / `CLAUDE.md` / etc. are symlinks for tool discovery).
+
+1. Read `.agent/AGENTS.md`, `.agent/claude-progress.md`, `.agent/feature_list.json`
+2. Run `./init.sh` (or `docker compose up --build` for the full stack)
 3. Work one feature at a time; record evidence before marking `passing`
-4. UI PRs: run unslop + follow `DESIGN.md` (tokens in `frontend/src/app.css`)
-
-## Docker (one command)
-
-Copy `.env.example` → `.env` and set `SECRET_KEY` / `POSTGRES_PASSWORD`. From repo root or `backend/`:
-
-```bash
-docker compose up --build
-```
-
-- App: http://localhost:3000
-- API: http://localhost:8000
-- Postgres: internal only (`db:5432`)
-
-Stop with `Ctrl+C`, or `docker compose down`.
-
-### Migrations
-
-```bash
-cd backend
-uv run alembic upgrade head
-```
+4. UI PRs: use `.agent/skills/unslop` + follow `.agent/DESIGN.md` (tokens in `frontend/src/app.css`)
 
 ## Money
 

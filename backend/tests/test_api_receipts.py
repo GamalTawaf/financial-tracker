@@ -226,7 +226,7 @@ def test_upload_rejects_unsupported_type_and_oversized(client) -> None:
     )
     assert bad_type.status_code == 400
 
-    with patch("financial_tracker_api.routers.receipts.run_ocr", return_value=("X", 0.9)):
+    with patch("financial_tracker_api.routers.receipts.extract_receipt_text", return_value=("X", 0.9)):
         huge = client.post(
             "/api/receipts/upload",
             headers=headers,
@@ -239,7 +239,7 @@ def test_upload_rejects_unsupported_type_and_oversized(client) -> None:
 def test_upload_ocr_failure_returns_422(client) -> None:
     token = register(client, "ocrfail@example.com")
     with patch(
-        "financial_tracker_api.routers.receipts.run_ocr",
+        "financial_tracker_api.routers.receipts.extract_receipt_text",
         side_effect=TypeError("Unsupported image format/type"),
     ):
         response = client.post(

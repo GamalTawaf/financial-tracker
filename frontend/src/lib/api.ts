@@ -113,6 +113,34 @@ async function refreshAccessToken(): Promise<string | null> {
 	return payload.access_token as string;
 }
 
+/** Turn API error payloads into a short UI string; never surface raw JSON or inputs. */
+function formatApiError(detail: unknown, fallback: string): string {
+	if (typeof detail === 'string' && detail.trim()) return detail;
+	if (Array.isArray(detail)) {
+		const parts = detail
+			.map((item) => {
+				if (typeof item === 'string') return item;
+				if (item && typeof item === 'object' && 'msg' in item) {
+					const loc = Array.isArray((item as { loc?: unknown }).loc)
+						? ((item as { loc: unknown[] }).loc as unknown[])
+						: [];
+					const field = [...loc].reverse().find((p) => p !== 'body' && typeof p === 'string');
+					const msg = String((item as { msg: unknown }).msg);
+					if (field === 'password') {
+						return msg.toLowerCase().includes('at least')
+							? 'Password must be at least 12 characters'
+							: msg;
+					}
+					return field ? `${field}: ${msg}` : msg;
+				}
+				return '';
+			})
+			.filter(Boolean);
+		if (parts.length) return parts.join('; ');
+	}
+	return fallback || 'Request failed';
+}
+
 async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
 	const headers = new Headers(init.headers);
 	const token = getToken();
@@ -126,14 +154,14 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
 		if (next) return request<T>(path, init, false);
 	}
 	if (!response.ok) {
-		let detail = response.statusText;
+		let detail: unknown = response.statusText;
 		try {
 			const payload = await response.json();
 			detail = payload.detail ?? detail;
 		} catch {
 			/* ignore */
 		}
-		throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+		throw new Error(formatApiError(detail, response.statusText || 'Request failed'));
 	}
 	if (response.status === 204) return undefined as T;
 	return response.json() as Promise<T>;
@@ -187,8 +215,8 @@ export const api = {
 	reparseReceipt: (id: number) =>
 		request<Receipt>(`/api/receipts/${id}/reparse`, { method: 'POST' }),
 	receiptImageUrl: (id: number) => `${API_BASE}/api/receipts/${id}/image`,
-	/** Fetch receipt image with Bearer auth; returns an object URL (caller should revoke). */
-	fetchReceiptImage: async (id: number): Promise<string> => {
+	/** Fetch receipt image/PDF with Bearer auth; returns object URL + MIME (caller should revoke). */
+	fetchReceiptImage: async (id: number): Promise<{ url: string; contentType: string }> => {
 		const headers = new Headers();
 		const token = getToken();
 		if (token) headers.set('Authorization', `Bearer ${token}`);
@@ -202,7 +230,10 @@ export const api = {
 		}
 		if (!response.ok) throw new Error('Image not available');
 		const blob = await response.blob();
-		return URL.createObjectURL(blob);
+		return {
+			url: URL.createObjectURL(blob),
+			contentType: blob.type || response.headers.get('content-type') || 'application/octet-stream'
+		};
 	},
 	listStores: () => request<Store[]>('/api/stores'),
 	uploadReceipt: (file: File) => {
@@ -210,6 +241,14 @@ export const api = {
 		form.append('file', file);
 		return request<Receipt>('/api/receipts/upload', { method: 'POST', body: form });
 	},
+	patchReceipt: (
+		id: number,
+		body: Partial<Pick<Receipt, 'store_name' | 'purchased_at' | 'needs_review' | 'review_reasons'>>
+	) =>
+		request<Receipt>(`/api/receipts/${id}`, {
+			method: 'PATCH',
+			body: JSON.stringify(body)
+		}),
 	patchLineItem: (id: number, body: Partial<LineItem>) =>
 		request<LineItem>(`/api/receipts/line-items/${id}`, {
 			method: 'PATCH',
