@@ -4,8 +4,8 @@ These JSON files define GitHub [repository rulesets](https://docs.github.com/en/
 
 | File | Branch | Merge method | Required checks |
 |------|--------|--------------|-----------------|
-| `develop.json` | `develop` | squash only | `backend`, `frontend`, `docker` |
-| `master.json` | `master` | merge commit only | those three + `release-gate` |
+| `develop.json` | `develop` | squash only | `backend`, `backend-unit`, `frontend`, `frontend-unit`, `docker` |
+| `master.json` | `master` | merge commit only | those five + `release-gate` |
 
 `release-gate` (in `.github/workflows/ci.yml`) fails any PR into `master` whose head is not `develop`.
 
