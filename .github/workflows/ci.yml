@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [develop, master]
   pull_request:
+    branches: [develop, master]
 
 jobs:
   backend:
@@ -55,3 +56,19 @@ jobs:
         run: docker build -t financial-tracker-api ./backend
       - name: Build web image
         run: docker build -t financial-tracker-web ./frontend
+
+  # Always runs so it can be a required check without "skipped = blocking".
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce develop → master only
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.base_ref }}" = "master" ]; then
+            if [ "${{ github.head_ref }}" != "develop" ]; then
+              echo "::error::PRs into master must come from develop (got '${{ github.head_ref }}')"
+              exit 1
+            fi
+            echo "OK: develop → master"
+          else
+            echo "OK: not a master PR"
+          fi
