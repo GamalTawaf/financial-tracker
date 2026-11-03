@@ -63,6 +63,8 @@ Open http://localhost:5173.
 
 ## Branching / merges
 
+Rules live in-repo under **`.github/rulesets/`** (synced to GitHub via `.github/workflows/apply-rulesets.yml` / `.github/scripts/apply-rulesets.sh`).
+
 - Default integration branch: **`develop`**. Feature PRs target `develop` and **must squash-merge** with CI green (`backend`, `frontend`, `docker`).
 - Production branch: **`master`**. Only **`develop` → `master`** PRs; **merge commit** only; CI green including `release-gate`.
 - Do not open feature PRs directly into `master`.
