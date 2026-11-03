@@ -11,7 +11,7 @@ on:
 
 concurrency:
   group: apply-rulesets
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   apply:
