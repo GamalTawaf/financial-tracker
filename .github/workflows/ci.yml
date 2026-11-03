@@ -18,11 +18,11 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Sync dependencies
@@ -85,11 +85,11 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Install Tesseract
@@ -128,8 +128,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -214,8 +214,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -225,8 +225,8 @@ jobs:
         run: |
           set -o pipefail
           npm test 2>&1 | tee vitest.log
-          tests_line="$(rg -N 'Tests ' vitest.log | tail -1 || true)"
-          files_line="$(rg -N 'Test Files ' vitest.log | tail -1 || true)"
+          tests_line="$(grep -E 'Tests ' vitest.log | tail -1 || true)"
+          files_line="$(grep -E 'Test Files ' vitest.log | tail -1 || true)"
           {
             echo "## Frontend — unit tests"
             echo ""
@@ -250,7 +250,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [backend, backend-unit, frontend, frontend-unit]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build API image
         run: |
           set -o pipefail
