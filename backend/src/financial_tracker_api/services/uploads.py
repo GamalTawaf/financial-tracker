@@ -18,12 +18,15 @@ ALLOWED_EXTENSIONS = frozenset(_FORMAT_EXTENSIONS.values())
 
 
 def sniff_image_extension(content: bytes) -> str:
-    """Return a safe image extension after verifying the payload is a real image.
+    """Return a safe image/PDF extension after verifying the payload.
 
-    Raises ValueError when the bytes are not an allowed image.
+    Raises ValueError when the bytes are not an allowed receipt file.
     """
     if not content:
         raise ValueError("Empty file")
+    # Costco Orders & Purchases exports (and similar) are text PDFs.
+    if content.startswith(b"%PDF"):
+        return ".pdf"
     try:
         from io import BytesIO
 
@@ -32,7 +35,7 @@ def sniff_image_extension(content: bytes) -> str:
         with Image.open(BytesIO(content)) as image:
             fmt = (image.format or "").upper()
     except (UnidentifiedImageError, OSError) as exc:
-        raise ValueError("File is not a valid image") from exc
+        raise ValueError("File is not a valid image or PDF") from exc
     extension = _FORMAT_EXTENSIONS.get(fmt)
     if extension is None:
         raise ValueError(f"Unsupported image format: {fmt or 'unknown'}")

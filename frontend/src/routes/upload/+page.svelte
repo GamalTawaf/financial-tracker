@@ -16,7 +16,7 @@
 	async function submit(event: Event) {
 		event.preventDefault();
 		if (!file) {
-			error = 'Choose a receipt image first.';
+			error = 'Choose a receipt image or PDF first.';
 			return;
 		}
 		pending = true;
@@ -37,21 +37,22 @@
 		<div>
 			<h1>Upload</h1>
 			<p class="page-lede">
-				Drop a JPG or PNG. Local OCR reads the lines, categories them, and applies Ontario HST.
+				Drop a photo or a Costco Orders &amp; Purchases PDF. We read the lines locally and apply
+				Ontario HST.
 			</p>
 		</div>
 	</div>
 
 	<form class="panel stack" onsubmit={submit}>
 		<label class="dropzone" for="file">
-			<strong>Choose receipt image</strong>
+			<strong>Choose receipt image or PDF</strong>
 			<p class="muted" style="margin: 8px auto 0; max-width: 36ch">
-				Phone photos work. Keep the whole slip in frame when you can.
+				JPG/PNG photos or Costco account PDFs. Keep the whole slip in frame when you can.
 			</p>
 			<input
 				id="file"
 				type="file"
-				accept="image/jpeg,image/png,image/webp,image/gif"
+				accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf"
 				onchange={(e) => (file = e.currentTarget.files?.[0] ?? null)}
 			/>
 			{#if file}

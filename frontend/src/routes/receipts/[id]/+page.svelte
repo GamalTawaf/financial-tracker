@@ -6,17 +6,74 @@
 	import ErrorState from '#lib/components/ErrorState.svelte';
 	import { api, formatMoney, getToken, type LineItem, type Receipt } from '#lib';
 
+	type ItemDraft = {
+		name: string;
+		quantity: string;
+		quantity_unit: string;
+		category: string;
+	};
+
+	const CATEGORY_OPTIONS = [
+		'fruit',
+		'vegetable',
+		'snacks',
+		'dairy',
+		'meat',
+		'bakery',
+		'beverages',
+		'grocery',
+		'clothes',
+		'gas',
+		'household',
+		'other'
+	] as const;
+
 	let receipt = $state<Receipt | null>(null);
 	let error = $state('');
 	let loading = $state(true);
 	let savingId = $state<number | null>(null);
 	let deleting = $state(false);
 	let reparsing = $state(false);
+	let reviewing = $state(false);
 	let imageUrl = $state<string | null>(null);
+	let imageContentType = $state('image/jpeg');
+	let drafts = $state<Record<number, ItemDraft>>({});
+
+	function draftFor(item: LineItem): ItemDraft {
+		return (
+			drafts[item.id] ?? {
+				name: item.name,
+				quantity: String(item.quantity),
+				quantity_unit: item.quantity_unit || 'ea',
+				category: item.category
+			}
+		);
+	}
+
+	function setDraft(itemId: number, patch: Partial<ItemDraft>) {
+		const item = receipt?.line_items.find((row) => row.id === itemId);
+		if (!item) return;
+		drafts = {
+			...drafts,
+			[itemId]: { ...draftFor(item), ...patch }
+		};
+	}
+
+	function isDirty(item: LineItem): boolean {
+		const draft = drafts[item.id];
+		if (!draft) return false;
+		return (
+			draft.name !== item.name ||
+			draft.quantity !== String(item.quantity) ||
+			draft.quantity_unit !== (item.quantity_unit || 'ea') ||
+			draft.category !== item.category
+		);
+	}
 
 	async function load() {
 		loading = true;
 		error = '';
+		drafts = {};
 		if (imageUrl) {
 			URL.revokeObjectURL(imageUrl);
 			imageUrl = null;
@@ -30,7 +87,9 @@
 			receipt = await api.getReceipt(id);
 			if (receipt.has_image) {
 				try {
-					imageUrl = await api.fetchReceiptImage(id);
+					const file = await api.fetchReceiptImage(id);
+					imageUrl = file.url;
+					imageContentType = file.contentType;
 				} catch {
 					imageUrl = null;
 				}
@@ -48,6 +107,7 @@
 		error = '';
 		try {
 			receipt = await api.reparseReceipt(receipt.id);
+			drafts = {};
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Re-parse failed';
 		} finally {
@@ -55,26 +115,61 @@
 		}
 	}
 
-	async function saveItem(itemId: number, field: string, value: string) {
+	async function markReviewed() {
 		if (!receipt) return;
-		savingId = itemId;
+		reviewing = true;
+		error = '';
 		try {
-			const body: Record<string, string | number | boolean> = {};
-			if (
-				field === 'name' ||
-				field === 'category' ||
-				field === 'tax_status' ||
-				field === 'quantity_unit'
-			) {
-				body[field] = value;
-			} else body[field] = Number(value);
-			const updated = await api.patchLineItem(itemId, body);
+			receipt = await api.patchReceipt(receipt.id, {
+				needs_review: false,
+				review_reasons: []
+			});
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Could not update review status';
+		} finally {
+			reviewing = false;
+		}
+	}
+
+	async function markNeedsReview() {
+		if (!receipt) return;
+		reviewing = true;
+		error = '';
+		try {
+			receipt = await api.patchReceipt(receipt.id, {
+				needs_review: true,
+				review_reasons: receipt.review_reasons?.length ? receipt.review_reasons : ['manual']
+			});
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Could not update review status';
+		} finally {
+			reviewing = false;
+		}
+	}
+
+	async function saveItem(item: LineItem) {
+		if (!receipt) return;
+		const draft = draftFor(item);
+		const body: Record<string, string | number> = {};
+		if (draft.name !== item.name) body.name = draft.name;
+		if (draft.quantity !== String(item.quantity)) body.quantity = Number(draft.quantity);
+		if (draft.quantity_unit !== (item.quantity_unit || 'ea')) {
+			body.quantity_unit = draft.quantity_unit;
+		}
+		if (draft.category !== item.category) body.category = draft.category;
+		if (Object.keys(body).length === 0) return;
+
+		savingId = item.id;
+		error = '';
+		try {
+			const updated = await api.patchLineItem(item.id, body);
 			receipt = {
 				...receipt,
-				line_items: receipt.line_items.map((item: LineItem) =>
-					item.id === itemId ? updated : item
-				)
+				line_items: receipt.line_items.map((row: LineItem) => (row.id === item.id ? updated : row))
 			};
+			const next = { ...drafts };
+			delete next[item.id];
+			drafts = next;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Save failed';
 		} finally {
@@ -115,6 +210,8 @@
 					{receipt.purchased_at ?? 'Unknown date'} · Total {formatMoney(receipt.total_cents)}
 					{#if receipt.needs_review}
 						· <span class="badge">Needs review</span>
+					{:else}
+						· <span class="badge badge-ok">Reviewed</span>
 					{/if}
 				</p>
 				{#if receipt.store?.address || receipt.store?.phone}
@@ -126,13 +223,8 @@
 						{#if receipt.store.phone}{receipt.store.phone}{/if}
 					</p>
 				{/if}
-				{#if receipt.review_reasons?.length}
-					<p class="muted" style="margin-top: 8px">
-						Flags: {receipt.review_reasons.join(', ')}
-					</p>
-				{/if}
 			</div>
-			<div class="actions">
+			<div class="header-actions">
 				<Button variant="ghost" type="button" onclick={load}>Reload</Button>
 				{#if receipt.has_image}
 					<Button variant="ghost" type="button" disabled={reparsing} onclick={reparse}>
@@ -144,17 +236,53 @@
 				</Button>
 			</div>
 		</div>
+
+		{#if receipt.needs_review}
+			<div class="review-banner panel" role="status">
+				<div>
+					<strong>Needs review</strong>
+					<p class="muted" style="margin: 4px 0 0">
+						{#if receipt.review_reasons?.length}
+							Flags: {receipt.review_reasons.join(', ')}.
+						{:else}
+							Parser was unsure about some lines.
+						{/if}
+						Check the items below, then clear the flag when it looks right.
+					</p>
+				</div>
+				<Button variant="success" type="button" disabled={reviewing} onclick={markReviewed}>
+					{reviewing ? 'Saving…' : 'Mark as reviewed'}
+				</Button>
+			</div>
+		{:else}
+			<div class="review-clear">
+				<Button variant="ghost" type="button" disabled={reviewing} onclick={markNeedsReview}>
+					{reviewing ? 'Saving…' : 'Flag for review'}
+				</Button>
+			</div>
+		{/if}
+
 		{#if error}
 			<p class="muted" style="margin-bottom: 12px; color: var(--danger, #b42318)">{error}</p>
 		{/if}
 
 		{#if imageUrl}
 			<figure class="receipt-image panel">
-				<img src={imageUrl} alt="Uploaded receipt" />
+				{#if imageContentType.includes('pdf')}
+					<embed src={imageUrl} type="application/pdf" title="Uploaded receipt PDF" />
+					<p class="muted" style="margin: 8px 0 0">
+						<a href={imageUrl} download="receipt.pdf">Download PDF</a>
+					</p>
+				{:else}
+					<img src={imageUrl} alt="Uploaded receipt" />
+				{/if}
 			</figure>
 		{/if}
 
 		<div class="panel">
+			<p class="muted save-hint">
+				Edit a row, then press Save. Category changes apply to future uploads.
+			</p>
 			<div class="table-wrap">
 				<table class="table">
 					<thead>
@@ -166,17 +294,20 @@
 							<th class="money">Tax</th>
 							<th>Category</th>
 							<th>Tax status</th>
+							<th></th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each receipt.line_items as item (item.id)}
-							<tr>
+							{@const draft = draftFor(item)}
+							{@const dirty = isDirty(item)}
+							<tr class:dirty>
 								<td>
 									<input
 										class="cell-input"
-										value={item.name}
+										value={draft.name}
 										aria-label="Item name"
-										onblur={(e) => saveItem(item.id, 'name', e.currentTarget.value)}
+										oninput={(e) => setDraft(item.id, { name: e.currentTarget.value })}
 									/>
 								</td>
 								<td>
@@ -184,17 +315,17 @@
 										class="cell-input cell-qty"
 										type="number"
 										step="0.01"
-										value={item.quantity}
+										value={draft.quantity}
 										aria-label="Quantity"
-										onblur={(e) => saveItem(item.id, 'quantity', e.currentTarget.value)}
+										oninput={(e) => setDraft(item.id, { quantity: e.currentTarget.value })}
 									/>
 								</td>
 								<td>
 									<select
 										class="cell-input"
-										value={item.quantity_unit || 'ea'}
+										value={draft.quantity_unit}
 										aria-label="Quantity unit"
-										onchange={(e) => saveItem(item.id, 'quantity_unit', e.currentTarget.value)}
+										onchange={(e) => setDraft(item.id, { quantity_unit: e.currentTarget.value })}
 									>
 										<option value="ea">ea</option>
 										<option value="kg">kg</option>
@@ -206,15 +337,30 @@
 								<td class="money">{formatMoney(item.line_total_cents)}</td>
 								<td class="money">{formatMoney(item.tax_amount_cents)}</td>
 								<td>
-									<input
+									<select
 										class="cell-input"
-										value={item.category}
+										value={draft.category}
 										aria-label="Category"
-										onblur={(e) => saveItem(item.id, 'category', e.currentTarget.value)}
-									/>
+										onchange={(e) => setDraft(item.id, { category: e.currentTarget.value })}
+									>
+										{#each CATEGORY_OPTIONS as option}
+											<option value={option}>{option}</option>
+										{/each}
+										{#if !CATEGORY_OPTIONS.includes(draft.category as (typeof CATEGORY_OPTIONS)[number])}
+											<option value={draft.category}>{draft.category}</option>
+										{/if}
+									</select>
 								</td>
-								<td class="muted status">
-									{savingId === item.id ? 'Saving…' : item.tax_status.replace('_', ' ')}
+								<td class="muted status">{item.tax_status.replace('_', ' ')}</td>
+								<td class="row-save">
+									<Button
+										variant={dirty ? 'primary' : 'ghost'}
+										type="button"
+										disabled={!dirty || savingId === item.id}
+										onclick={() => saveItem(item)}
+									>
+										{savingId === item.id ? 'Saving…' : 'Save'}
+									</Button>
 								</td>
 							</tr>
 						{/each}
@@ -229,18 +375,52 @@
 </section>
 
 <style>
+	.header-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-3);
+	}
+
+	.review-banner {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-4);
+		margin-bottom: 20px;
+		border-color: var(--color-warning);
+		background: var(--color-warning-soft);
+	}
+
+	.review-banner strong {
+		display: block;
+		color: var(--color-warning);
+	}
+
+	.review-clear {
+		margin-bottom: 16px;
+	}
+
+	.save-hint {
+		margin: 0 0 12px;
+		font-size: var(--text-sm);
+	}
+
 	.receipt-image {
 		margin: 0 0 20px;
 		padding: 12px;
 		overflow: hidden;
 	}
 
-	.receipt-image img {
+	.receipt-image img,
+	.receipt-image embed {
 		display: block;
 		width: 100%;
-		max-height: 420px;
+		min-height: 320px;
+		max-height: 520px;
 		object-fit: contain;
 		background: #f4f4f2;
+		border: 0;
 	}
 
 	.cell-input {
@@ -269,5 +449,14 @@
 		font-size: 0.8rem;
 		text-transform: capitalize;
 		white-space: nowrap;
+	}
+
+	.row-save {
+		white-space: nowrap;
+		text-align: right;
+	}
+
+	tr.dirty {
+		background: color-mix(in srgb, var(--color-brand) 6%, transparent);
 	}
 </style>

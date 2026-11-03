@@ -102,7 +102,7 @@ def mock_ocr(text: str = SIMPLE_OCR) -> Iterator[None]:
 def mock_ocr_result(text: str, confidence: float) -> Iterator[None]:
     """Mock OCR service return when confidence must be controlled precisely."""
     with patch(
-        "financial_tracker_api.routers.receipts.run_ocr",
+        "financial_tracker_api.routers.receipts.extract_receipt_text",
         return_value=(text, confidence),
     ):
         yield

@@ -8,7 +8,7 @@
 ## Changed This Session
 
 - Code or behavior added: none yet (scaffold pending)
-- Infrastructure or harness changes: AGENTS.md, feature_list, init.sh, skills
+- Infrastructure or harness changes: `.agent/` harness (AGENTS, feature_list, skills), init.sh
 
 ## Broken Or Unverified
 

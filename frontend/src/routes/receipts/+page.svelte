@@ -8,6 +8,7 @@
 	let receipts = $state<Receipt[]>([]);
 	let error = $state('');
 	let loading = $state(true);
+	let reviewingId = $state<number | null>(null);
 
 	async function load() {
 		loading = true;
@@ -22,6 +23,24 @@
 			error = err instanceof Error ? err.message : 'Failed to load receipts';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function markReviewed(id: number) {
+		reviewingId = id;
+		error = '';
+		try {
+			const updated = await api.patchReceipt(id, {
+				needs_review: false,
+				review_reasons: []
+			});
+			receipts = receipts.map((r) =>
+				r.id === id ? { ...r, ...updated, line_items: r.line_items } : r
+			);
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Could not mark as reviewed';
+		} finally {
+			reviewingId = null;
 		}
 	}
 
@@ -61,6 +80,7 @@
 							<th>Date</th>
 							<th class="money">Total</th>
 							<th>Status</th>
+							<th></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -82,7 +102,19 @@
 									{#if receipt.needs_review}
 										<span class="badge">Needs review</span>
 									{:else}
-										<span class="badge badge-ok">Clear</span>
+										<span class="badge badge-ok">Reviewed</span>
+									{/if}
+								</td>
+								<td class="row-action">
+									{#if receipt.needs_review}
+										<Button
+											variant="success"
+											type="button"
+											disabled={reviewingId === receipt.id}
+											onclick={() => markReviewed(receipt.id)}
+										>
+											{reviewingId === receipt.id ? 'Saving…' : 'Mark reviewed'}
+										</Button>
 									{/if}
 								</td>
 							</tr>
@@ -93,3 +125,10 @@
 		</div>
 	{/if}
 </section>
+
+<style>
+	.row-action {
+		text-align: right;
+		white-space: nowrap;
+	}
+</style>

@@ -38,11 +38,41 @@ def _register_full(client, email: str) -> dict:
 
 
 def test_register_rejects_weak_password(client) -> None:
+    secret = "test123!H"
     response = client.post(
         "/api/auth/register",
-        json={"email": "weak@example.com", "password": "short"},
+        json={"email": "weak@example.com", "password": secret},
     )
     assert response.status_code == 422
+    body = response.json()
+    assert isinstance(body["detail"], str)
+    assert "12" in body["detail"]
+    assert secret not in response.text
+    assert "input" not in response.text
+    assert "string_too_short" not in response.text
+
+
+def test_register_validation_errors_are_friendly_and_secret_free(client) -> None:
+    long_weak = "alllowercase1"
+    strength = client.post(
+        "/api/auth/register",
+        json={"email": "strength@example.com", "password": long_weak},
+    )
+    assert strength.status_code == 422
+    assert isinstance(strength.json()["detail"], str)
+    assert long_weak not in strength.text
+    assert (
+        "Password" in strength.json()["detail"] or "uppercase" in strength.json()["detail"].lower()
+    )
+
+    bad_email = client.post(
+        "/api/auth/register",
+        json={"email": "not-an-email", "password": "Password123!ab"},
+    )
+    assert bad_email.status_code == 422
+    assert isinstance(bad_email.json()["detail"], str)
+    assert "Email" in bad_email.json()["detail"]
+    assert "not-an-email" not in bad_email.text
 
 
 def test_refresh_rotates_and_old_token_fails(client) -> None:
@@ -194,7 +224,7 @@ Candy 1.00
 TOTAL 1.00
 """
     with patch(
-        "financial_tracker_api.routers.receipts.run_ocr",
+        "financial_tracker_api.routers.receipts.extract_receipt_text",
         return_value=(new_ocr, 0.95),
     ):
         response = client.post(f"/api/receipts/{receipt_id}/reparse", headers=headers)
@@ -350,7 +380,7 @@ def test_webp_upload_accepted(client) -> None:
     buf = BytesIO()
     Image.new("RGB", (32, 32), (10, 20, 30)).save(buf, format="WEBP")
     with patch(
-        "financial_tracker_api.routers.receipts.run_ocr",
+        "financial_tracker_api.routers.receipts.extract_receipt_text",
         return_value=("Shop\nItem 1.00\nTOTAL 1.00\n", 0.9),
     ):
         response = client.post(
@@ -480,7 +510,7 @@ def test_reparse_ocr_failure(client) -> None:
     headers = auth_header(token)
     receipt_id = upload_receipt(client, token).json()["id"]
     with patch(
-        "financial_tracker_api.routers.receipts.run_ocr",
+        "financial_tracker_api.routers.receipts.extract_receipt_text",
         side_effect=OSError("disk read fail"),
     ):
         response = client.post(f"/api/receipts/{receipt_id}/reparse", headers=headers)

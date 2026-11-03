@@ -40,6 +40,7 @@ def client() -> Generator[TestClient]:
     was_enabled = limiter.enabled
     limiter.enabled = False
     app = create_app()
+    app.state.test_engine = engine
     app.dependency_overrides[get_session] = _override_session
     with TestClient(app) as test_client:
         yield test_client

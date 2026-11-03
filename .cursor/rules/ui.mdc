@@ -6,8 +6,8 @@ alwaysApply: false
 
 # UI PR Contract
 
-- Use `.agents/skills/unslop` plus impeccable / design-taste on any UI change.
-- Facts from code. `DESIGN.md` is the contract. Tokens only in `frontend/src/app.css`.
+- Use `.agent/skills/unslop` plus impeccable / design-taste on any UI change.
+- Facts from code. `.agent/DESIGN.md` is the contract. Tokens only in `frontend/src/app.css`.
 - Use host tokens — do not invent a palette.
 - One global Button owns lighting (gradient, insets, outer drop; press = translateY(1px) only).
 - Bans: no Popover split buttons; no oversized fields; no second-hue focus ring; no 24/12 card lift; no press-scale; no spinner→check.

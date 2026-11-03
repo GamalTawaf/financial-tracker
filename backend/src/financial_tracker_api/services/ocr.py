@@ -1,4 +1,4 @@
-"""Local Tesseract OCR wrapper."""
+"""Local Tesseract OCR + PDF text extraction."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytesseract
 from PIL import Image, ImageOps
+from pypdf import PdfReader
 
 # Single uniform block of text — best for tall thermal receipts.
 _OCR_CONFIG = "--oem 3 --psm 6"
@@ -49,3 +50,24 @@ def run_ocr(image_path: Path) -> tuple[str, float]:
 
     mean_conf = sum(confidences) / len(confidences)
     return plain, mean_conf
+
+
+def _pdf_text(path: Path) -> str:
+    reader = PdfReader(str(path))
+    parts: list[str] = []
+    for page in reader.pages:
+        parts.append(page.extract_text() or "")
+    return "\n".join(parts).strip()
+
+
+def extract_receipt_text(path: Path) -> tuple[str, float]:
+    """Return (text, confidence) from a receipt image or text PDF.
+
+    Costco Orders & Purchases exports are text PDFs — extract without OCR.
+    """
+    if path.suffix.lower() == ".pdf":
+        text = _pdf_text(path)
+        if len(text) < 20:
+            raise ValueError("PDF has no extractable text")
+        return text, 0.98
+    return run_ocr(path)

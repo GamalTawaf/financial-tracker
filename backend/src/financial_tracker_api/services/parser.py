@@ -18,6 +18,8 @@ class ParsedLine:
     confidence: float
     category: str | None = None
     quantity_unit: str = "ea"
+    # Costco slips print N (not taxed) / Y (taxed); None = infer later.
+    tax_status: str | None = None
 
 
 @dataclass
@@ -62,9 +64,19 @@ _SKIP_NAME = re.compile(
     r"debit|credit|thank|tel\.?|phone|account|card|trans\.?|date|ref|"
     r"saving|promo|visit|www\.|http|shop |join |how did|your code|"
     r"e&oe|grocery|vegetable|keep |xxx+|#+|mediterranean|"
-    r"delivered|cornershop|survey)",
+    r"delivered|cornershop|survey|amount|approved|member|orders|"
+    r"chip|whse|trm|trn|opt|items?\s*sold|total\s*tax|total\s*number|"
+    r"\(a\)\s*hst|please come|read$)",
     re.I,
 )
+# Costco warehouse slip: ``57554 BLUEBERRIES 12.99 N`` (SKU + name + price + tax flag).
+_COSTCO_ITEM = re.compile(
+    r"^(?:(?P<sku>\d{3,})\s+)?(?P<name>.+?)\s+(?P<price>\d+[.,]\d{2})\s+(?P<tax>[NY])\s*$",
+    re.I,
+)
+_COSTCO_PRICE_ONLY = re.compile(r"^(?P<price>\d+[.,]\d{2})\s+(?P<tax>[NY])\s*$", re.I)
+_TOTAL_LABEL = re.compile(r"^(sub\s*tot(?:al)?|subtotal|tax|hst|gst|tot(?:al)?)\s*$", re.I)
+_MONEY_ONLY = re.compile(r"^\$?\s*-?\d+[.,]\d{2}\s*$")
 _SECTION = re.compile(
     r"^(grocery|vegetable|vegetables|produce|fruit|fruits|bakery|meat|deli|"
     r"dairy|beverage|beverages|frozen|seafood|snacks?|"
@@ -101,6 +113,13 @@ _ADDRESSISH = re.compile(
     r"\b(rd|road|st|street|ave|avenue|blvd|unit|suite|on|qc|bc|ab)\b|\d{3,}",
     re.I,
 )
+
+
+def _costco_tax_status(flag: str | None) -> str | None:
+    """Map Costco receipt N/Y flags to our tax_status values."""
+    if not flag:
+        return None
+    return "taxable" if flag.upper() == "Y" else "zero_rated"
 
 
 def _to_cents(raw: str) -> int:
@@ -163,6 +182,24 @@ def _clean_item_name(raw: str) -> str:
 
 def _pick_store_name(lines: list[str]) -> str:
     """Prefer a real banner (e.g. ADONIS 101204) over OCR crumbs like ``~~``."""
+    joined = "\n".join(lines)
+    # Costco Orders PDF often puts "Costco" on a later page/header; scan all lines.
+    if re.search(r"\bcostco\b|orders\s*&\s*purchases", joined, re.I) or (
+        re.search(r"#\d{3,}", joined)
+        and re.search(r"\bmember\b", joined, re.I)
+        and re.search(r"\b\d+[.,]\d{2}\s+[NY]\b", joined, re.I)
+    ):
+        warehouse = next(
+            (
+                re.sub(r"^N\s+", "", line.strip(), flags=re.I)
+                for line in lines[:24]
+                if re.search(r"#\d{3,}", line) and re.search(r"[A-Za-z]{3,}", line)
+            ),
+            "",
+        )
+        if warehouse:
+            return _clean_store_name(f"COSTCO {warehouse}")
+        return "COSTCO"
     preferred = re.compile(r"\bADON[IT]S\b", re.I)
     for line in lines[:12]:
         if _STORE_JUNK.match(line.strip(" -.")):
@@ -261,6 +298,7 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
         return result
 
     result.store_name = _pick_store_name(lines)
+    is_costco = "COSTCO" in result.store_name.upper()
     phone_anywhere = _PHONE.search(text)
     if phone_anywhere:
         result.store_phone = re.sub(r"\s+", " ", phone_anywhere.group(1)).strip()
@@ -268,15 +306,23 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
     address_parts: list[str] = []
     # Address sits under the store banner — skip OCR crumbs / taglines above it.
     header_start = next(
-        (idx for idx, header in enumerate(lines[:12]) if re.search(r"\bADON[IT]S\b", header, re.I)),
+        (
+            idx
+            for idx, header in enumerate(lines[:16])
+            if re.search(r"\bADON[IT]S\b|#\d{3,}", header, re.I)
+        ),
         0,
     )
     for header in lines[header_start + 1 : header_start + 8]:
         if _PHONE.search(header) or _STORE_JUNK.match(header.strip(" -.")):
             continue
+        if re.match(r"^(member|orders)\b", header, re.I):
+            break
         if _SECTION.match(header) or _SKIP_NAME.match(header):
             break
         if _TRAILING_PRICE.match(header) and not _ADDRESSISH.search(header):
+            break
+        if _COSTCO_ITEM.match(header):
             break
         if _ADDRESSISH.search(header) or re.search(r"[A-Z]\d[A-Z]\s*\d[A-Z]\d", header, re.I):
             address_parts.append(_clean_address_line(header))
@@ -285,20 +331,50 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
     result.store_address = ", ".join(part for part in address_parts if part)
 
     pending_name: str | None = None
+    pending_total_kind: str | None = None
     section_category: str | None = None
     amount_paid_cents: int | None = None
 
     for line in lines[1:]:
         date_match = _DATE.search(line)
-        if date_match and result.purchased_at is None:
+        if date_match:
             parsed = _parse_date(date_match.group(1))
             if parsed:
-                result.purchased_at = parsed
+                token = date_match.group(1)
+                year_part = token.replace("-", "/").split("/")[-1]
+                # Prefer purchase timestamps (4-digit year + time) over print headers.
+                if result.purchased_at is None or (len(year_part) == 4 and ":" in line):
+                    result.purchased_at = parsed
 
         lower = line.lower()
         section = _SECTION.match(line)
         if section:
             section_category = _section_category(section.group(1))
+            pending_name = None
+            pending_total_kind = None
+            continue
+
+        label = _TOTAL_LABEL.match(line)
+        if label and not _MONEY.search(line):
+            kind = label.group(1).lower().replace(" ", "")
+            if "sub" in kind:
+                pending_total_kind = "subtotal"
+            elif kind in {"tax", "hst", "gst"}:
+                pending_total_kind = "tax"
+            else:
+                pending_total_kind = "total"
+            pending_name = None
+            continue
+
+        if pending_total_kind and _MONEY_ONLY.match(line):
+            cents = _to_cents(_MONEY.search(line).group(1))  # type: ignore[union-attr]
+            if pending_total_kind == "subtotal":
+                result.subtotal_cents = cents
+            elif pending_total_kind == "tax":
+                result.tax_total_cents = cents
+            else:
+                result.total_cents = cents
+            pending_total_kind = None
             pending_name = None
             continue
 
@@ -313,14 +389,17 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
             ):
                 amount_paid_cents = cents
                 pending_name = None
+                pending_total_kind = None
                 continue
             if "subtot" in compact:
                 result.subtotal_cents = cents
                 pending_name = None
+                pending_total_kind = None
                 continue
             if re.search(r"\b(hst|gst|pst|tax)\b", lower) and "hst#" not in lower:
                 result.tax_total_cents = cents
                 pending_name = None
+                pending_total_kind = None
                 continue
             # OCR often splits TOTAL → ``TOT AL``; compact still contains ``total``.
             if (
@@ -333,14 +412,57 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
                 and "account" not in lower
                 and "mastercard" not in lower
                 and "grocer" not in lower
+                and "amount" not in compact
             ):
                 result.total_cents = cents
                 pending_name = None
+                pending_total_kind = None
                 continue
 
         if _SKIP_NAME.match(line):
             if re.match(r"^saving\b", line, re.I):
                 pending_name = None
+            continue
+
+        costco_item = _COSTCO_ITEM.match(line)
+        if costco_item:
+            name = _clean_item_name(costco_item.group("name"))
+            if len(name) >= 2 and not _SKIP_NAME.match(name):
+                price = _to_cents(costco_item.group("price"))
+                pending_name = None
+                pending_total_kind = None
+                result.lines.append(
+                    ParsedLine(
+                        name=name,
+                        quantity=1.0,
+                        unit_price_cents=price,
+                        line_total_cents=price,
+                        confidence=0.95 if is_costco else 0.85,
+                        category=section_category,
+                        quantity_unit="ea",
+                        tax_status=_costco_tax_status(costco_item.group("tax")),
+                    )
+                )
+            continue
+
+        costco_price = _COSTCO_PRICE_ONLY.match(line)
+        if costco_price and pending_name:
+            price = _to_cents(costco_price.group("price"))
+            name = _clean_item_name(pending_name)
+            pending_name = None
+            pending_total_kind = None
+            result.lines.append(
+                ParsedLine(
+                    name=name,
+                    quantity=1.0,
+                    unit_price_cents=price,
+                    line_total_cents=price,
+                    confidence=0.9,
+                    category=section_category,
+                    quantity_unit="ea",
+                    tax_status=_costco_tax_status(costco_price.group("tax")),
+                )
+            )
             continue
 
         weight = _WEIGHT_LINE.match(line)
@@ -431,6 +553,7 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
         # Bare product name waiting for a weight/price line.
         if (
             len(line) >= 3
+            and not re.fullmatch(r"\d{6,}", line)
             and not _MONEY.search(line)
             and not _DATE.search(line)
             and not _ADDRESSISH.search(line)

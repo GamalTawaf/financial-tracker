@@ -42,13 +42,14 @@ echo "==> Running baseline verification"
 )
 
 echo "==> Startup commands"
-echo "    (cd backend && uv run uvicorn financial_tracker_api.main:app --reload --port 8000)"
-echo "    (cd frontend && npm run dev)"
+echo "    Preferred: docker compose up --build   # app http://localhost:3000"
+echo "    Local API:  (cd backend && uv run uvicorn financial_tracker_api.main:app --reload --port 8000)"
+echo "    Local web:  (cd frontend && npm run dev)  # http://localhost:5173"
 
 if [[ "${RUN_START_COMMAND:-0}" = "1" ]]; then
   echo "==> Starting API (background) and frontend"
-  (cd backend && uv run uvicorn app.main:app --reload --port 8000) &
+  (cd backend && uv run uvicorn financial_tracker_api.main:app --reload --port 8000) &
   (cd frontend && npm run dev)
 fi
 
-echo "Set RUN_START_COMMAND=1 if you want init.sh to launch servers."
+echo "Set RUN_START_COMMAND=1 if you want init.sh to launch local (non-Docker) servers."
