@@ -61,6 +61,14 @@ Open http://localhost:5173.
 - Receipt images served only via authenticated `GET /api/receipts/{id}/image`
 - OpenAPI/Swagger disabled when `ENVIRONMENT=production` (override with `ENABLE_DOCS=true`)
 
+## Branching / merges
+
+Rules live in-repo under **`.github/rulesets/`** (synced to GitHub via `.github/workflows/apply-rulesets.yml` / `.github/scripts/apply-rulesets.sh`).
+
+- Default integration branch: **`develop`**. Feature PRs target `develop` and **must squash-merge** with CI green (`backend`, `backend-unit`, `frontend`, `frontend-unit`, `docker`).
+- Production branch: **`master`**. Only **`develop` → `master`** PRs; **merge commit** only; CI green including `release-gate`.
+- Do not open feature PRs directly into `master`.
+
 ## Agent workflow
 
 Agent instructions and progress live under **`.agent/`** (root `AGENTS.md` / `CLAUDE.md` / etc. are symlinks for tool discovery).

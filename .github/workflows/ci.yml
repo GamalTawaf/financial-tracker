@@ -2,56 +2,343 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [develop, master]
   pull_request:
+    branches: [develop, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
+    name: backend
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Sync dependencies
+        run: |
+          uv sync --all-extras
+          {
+            echo "## Backend — dependencies"
+            echo ""
+            echo "**Reviewed:** Python 3.13 lockfile / extras via \`uv sync --all-extras\`."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| Sync | passed |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Ruff check
+        run: |
+          set -o pipefail
+          uv run ruff check . 2>&1 | tee ruff-check.log
+          {
+            echo "## Backend — Ruff lint"
+            echo ""
+            echo "**Reviewed:** \`backend/\` with select \`E,F,I,UP,B\` (see \`pyproject.toml\`)."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| \`ruff check .\` | passed |"
+            echo ""
+            echo "<details><summary>Output</summary>"
+            echo ""
+            echo '```'
+            cat ruff-check.log
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Ruff format
+        run: |
+          set -o pipefail
+          uv run ruff format --check . 2>&1 | tee ruff-format.log
+          {
+            echo "## Backend — Ruff format"
+            echo ""
+            echo "**Reviewed:** PEP 8 formatting for all Python under \`backend/\`."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| \`ruff format --check .\` | passed |"
+            echo ""
+            echo "<details><summary>Output</summary>"
+            echo ""
+            echo '```'
+            cat ruff-format.log
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  backend-unit:
+    name: backend-unit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Install Tesseract
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
-      - name: Sync and verify
+      - name: Sync dependencies
+        run: uv sync --all-extras
+      - name: Unit tests
         run: |
-          uv sync --all-extras
-          uv run ruff check .
-          uv run ruff format --check .
-          uv run pytest -q
+          set -o pipefail
+          uv run pytest -q --junitxml=pytest-results.xml 2>&1 | tee pytest.log
+          passed="$(grep -oE '[0-9]+ passed' pytest.log | head -1 || true)"
+          coverage="$(grep -oE 'Total coverage: [0-9.]+%' pytest.log | head -1 || true)"
+          {
+            echo "## Backend — unit tests"
+            echo ""
+            echo "**Reviewed:** \`backend/tests\` — auth, receipts upload/OCR, Costco PDF parse, categories / learned rules, store dedupe, Ontario tax, security, CLI."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| pytest | ${passed:-see log} |"
+            echo "| coverage gate | ${coverage:-100% required} |"
+            echo "| fail-under | 100% (\`pyproject.toml\`) |"
+            echo ""
+            echo "<details><summary>pytest output (tail)</summary>"
+            echo ""
+            echo '```'
+            tail -n 40 pytest.log
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   frontend:
+    name: frontend
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: |
+          npm ci
+          {
+            echo "## Frontend — dependencies"
+            echo ""
+            echo "**Reviewed:** \`frontend/package-lock.json\` install via \`npm ci\` (Node 22)."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| npm ci | passed |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Typecheck
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee check.log
+          {
+            echo "## Frontend — typecheck"
+            echo ""
+            echo "**Reviewed:** SvelteKit / TypeScript (\`svelte-check\`) across \`frontend/src\`."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| \`npm run check\` | passed |"
+            echo ""
+            echo "<details><summary>Output</summary>"
+            echo ""
+            echo '```'
+            tail -n 30 check.log
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Build
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build.log
+          {
+            echo "## Frontend — production build"
+            echo ""
+            echo "**Reviewed:** \`vite build\` / SvelteKit adapter output for deployable web assets."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| \`npm run build\` | passed |"
+            echo ""
+            echo "<details><summary>Output (tail)</summary>"
+            echo ""
+            echo '```'
+            tail -n 40 build.log
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Lint
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee lint.log
+          {
+            echo "## Frontend — lint"
+            echo ""
+            echo "**Reviewed:** Prettier format check + ESLint on \`frontend/\`."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| \`npm run lint\` | passed |"
+            echo ""
+            echo "<details><summary>Output</summary>"
+            echo ""
+            echo '```'
+            cat lint.log
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-unit:
+    name: frontend-unit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: npm run check
-      - run: npm test
-      - run: npm run build
-      - run: npm run lint
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee vitest.log
+          tests_line="$(grep -E 'Tests ' vitest.log | tail -1 || true)"
+          files_line="$(grep -E 'Test Files ' vitest.log | tail -1 || true)"
+          {
+            echo "## Frontend — unit tests"
+            echo ""
+            echo "**Reviewed:** Vitest under \`frontend/\` (\`npm test\` → \`vitest --run\`)."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| Test files | ${files_line:-see log} |"
+            echo "| Tests | ${tests_line:-see log} |"
+            echo ""
+            echo "<details><summary>vitest output</summary>"
+            echo ""
+            echo '```'
+            cat vitest.log
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   docker:
+    name: docker
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, backend-unit, frontend, frontend-unit]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build API image
-        run: docker build -t financial-tracker-api ./backend
+        run: |
+          set -o pipefail
+          docker build -t financial-tracker-api ./backend 2>&1 | tee api-build.log
+          {
+            echo "## Docker — API image"
+            echo ""
+            echo "**Reviewed:** \`backend/Dockerfile\` multi-stage build (FastAPI + Tesseract image)."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| \`docker build ./backend\` | passed |"
+            echo "| Tag | \`financial-tracker-api\` |"
+            echo ""
+            echo "<details><summary>Build output (tail)</summary>"
+            echo ""
+            echo '```'
+            tail -n 30 api-build.log
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Build web image
-        run: docker build -t financial-tracker-web ./frontend
+        run: |
+          set -o pipefail
+          docker build -t financial-tracker-web ./frontend 2>&1 | tee web-build.log
+          {
+            echo "## Docker — web image"
+            echo ""
+            echo "**Reviewed:** \`frontend/Dockerfile\` production image for the SvelteKit app."
+            echo ""
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| \`docker build ./frontend\` | passed |"
+            echo "| Tag | \`financial-tracker-web\` |"
+            echo ""
+            echo "<details><summary>Build output (tail)</summary>"
+            echo ""
+            echo '```'
+            tail -n 30 web-build.log
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release-gate:
+    name: release-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce develop → master only
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.base_ref }}" = "master" ]; then
+            if [ "${{ github.head_ref }}" != "develop" ]; then
+              {
+                echo "## Release gate"
+                echo ""
+                echo "**Reviewed:** PR base/head for production merges."
+                echo ""
+                echo "| Item | Value |"
+                echo "| --- | --- |"
+                echo "| event | pull_request |"
+                echo "| base | master |"
+                echo "| head | \`${{ github.head_ref }}\` |"
+                echo "| result | **failed** — head must be \`develop\` |"
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::PRs into master must come from develop (got '${{ github.head_ref }}')"
+              exit 1
+            fi
+            {
+              echo "## Release gate"
+              echo ""
+              echo "**Reviewed:** PR must be \`develop\` → \`master\` (merge commit only; see rulesets)."
+              echo ""
+              echo "| Item | Value |"
+              echo "| --- | --- |"
+              echo "| base | master |"
+              echo "| head | develop |"
+              echo "| result | passed |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Release gate"
+              echo ""
+              echo "**Reviewed:** Only enforced on PRs targeting \`master\`."
+              echo ""
+              echo "| Item | Value |"
+              echo "| --- | --- |"
+              echo "| event | \`${{ github.event_name }}\` |"
+              echo "| base | \`${{ github.base_ref || '(n/a)' }}\` |"
+              echo "| head | \`${{ github.head_ref || github.ref_name }}\` |"
+              echo "| result | skipped / OK |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

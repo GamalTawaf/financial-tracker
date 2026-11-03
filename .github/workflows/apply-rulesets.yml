@@ -1,0 +1,31 @@
+name: Apply rulesets
+
+# Source of truth: .github/rulesets/*.json
+# Keeps GitHub ruleset settings in sync with the repo (idempotent create/update by name).
+
+on:
+  push:
+    branches: [develop, master]
+    paths: [".github/rulesets/**", ".github/workflows/apply-rulesets.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: apply-rulesets
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Sync rulesets from .github/rulesets
+        env:
+          GH_TOKEN: ${{ secrets.RULESET_ADMIN_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::Secret RULESET_ADMIN_TOKEN is not set. Ruleset JSON in .github/rulesets is the source of truth; apply locally with ./.github/scripts/apply-rulesets.sh or add a PAT (Administration: read/write)."
+            exit 0
+          fi
+          bash .github/scripts/apply-rulesets.sh
